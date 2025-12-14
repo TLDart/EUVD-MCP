@@ -1,0 +1,148 @@
+# Pre-commit hooks configuration
+# Mirrors CI checks and enforces local code quality standards
+# Install: pre-commit install
+# Run manually: pre-commit run --all-files
+
+repos:
+  # Code formatting
+  - repo: https://github.com/psf/black
+    rev: 25.1.0
+    hooks:
+      - id: black
+        language_version: python3.12
+        args: ["--line-length=127"]
+
+  # Import sorting
+  - repo: https://github.com/PyCQA/isort
+    rev: 7.0.0
+    hooks:
+      - id: isort
+        args: ["--profile=black", "--line-length=127"]
+
+  # Linting
+  - repo: https://github.com/PyCQA/flake8
+    rev: 7.1.1
+    hooks:
+      - id: flake8
+        args: ["--max-line-length=127", "--max-complexity=10", "--ignore=E203,E266,E501,W503"]
+
+  # Ruff - Fast Python linter
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.9
+    hooks:
+      # Run the linter.
+      - id: ruff-check
+
+  # Type checking
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.13.0
+    hooks:
+      - id: mypy
+        args: ["--strict"]
+        additional_dependencies:
+          - pydantic
+          - pydantic-settings
+          - types-requests
+          - types-urllib3
+        exclude: "^euvd_mcp/tests/"
+
+  # Security checks
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.7.9
+    hooks:
+      - id: bandit
+        args: ["-ll"]
+        exclude: "^euvd_mcp/tests/"
+
+  # Common issues detection
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: detect-private-key
+      - id: debug-statements
+        language_version: python3.12
+
+  # Docstring formatting
+  - repo: https://github.com/PyCQA/pydocstyle
+    rev: 6.3.0
+    hooks:
+      - id: pydocstyle
+        exclude: "^euvd_mcp/tests/"
+        args: ["--ignore=D400,D212, D415,D203,D200"]
+
+# Local hooks for comprehensive testing
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest
+        entry: poetry run pytest euvd_mcp/tests/ -v --strict-markers
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [pre-commit]
+
+      - id: pytest-cov
+        name: pytest-cov
+        entry: poetry run pytest euvd_mcp/tests/ --cov=euvd_mcp --cov-fail-under=70
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [manual]
+        description: Run tests with coverage threshold (70%)
+
+      - id: pylint
+        name: pylint
+        entry: poetry run pylint --recursive=y
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [manual]
+        description: Run pylint checks
+
+      - id: pip-audit
+        name: pip-audit
+        entry: poetry run pip-audit
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [manual]
+        description: Audit dependencies for known vulnerabilities
+
+# Configuration
+default_language_version:
+  python: "3.12"
+
+# Fail fast on first error
+fail_fast: false
+
+# Exclude files
+exclude: |
+  (?x)^(
+    .venv/|
+    venv/|
+    __pycache__/|
+    .pytest_cache/|
+    .mypy_cache/|
+    .ruff_cache/|
+    htmlcov/|
+    \.git/|
+    \.egg-info/|
+    build/|
+    dist/
+  )
+
+ci:
+  autofix_commit_msg: |
+    [pre-commit.ci] auto fixes from hooks
+
+    for more information, see https://pre-commit.ci
+  autofix_prs: true
+  autoupdate_commit_msg: "[pre-commit.ci] pre-commit autoupdate"
+  autoupdate_schedule: weekly
+  skip: [pytest, pytest-cov, pylint, pip-audit]
+  submodules: false
