@@ -1,0 +1,76 @@
+name: Code Quality
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  code-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+
+      - name: Cache Poetry dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pypoetry
+          key: ${{ runner.os }}-poetry-${{ hashFiles('**/poetry.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-poetry-
+
+      - name: Install dependencies
+        run: poetry install
+
+      - name: Run Black formatter check
+        run: |
+          poetry add --group dev black 2>/dev/null || true
+          poetry run black --check . || true
+        continue-on-error: true
+
+      - name: Run isort import check
+        run: |
+          poetry add --group dev isort 2>/dev/null || true
+          poetry run isort --check-only . || true
+        continue-on-error: true
+
+      - name: Run Pylint
+        run: |
+          poetry add --group dev pylint 2>/dev/null || true
+          poetry run pylint --recursive=y . --exit-zero || true
+        continue-on-error: true
+
+      - name: Run Ruff linter
+        run: |
+          poetry add --group dev ruff 2>/dev/null || true
+          poetry run ruff check . || true
+        continue-on-error: true
+
+  documentation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check if README exists
+        run: |
+          if [ -f README.md ]; then
+            echo "✓ README.md found"
+          else
+            echo "✗ README.md not found"
+          fi
+
+      - name: Validate markdown
+        uses: nosborn/github-action-markdown-cli@v3.3.0
+        with:
+          files: .
+          config_file: .markdownlint.json
+        continue-on-error: true

@@ -1,0 +1,10 @@
+services:
+  euvd-mcp:
+    build: .
+    image: euvd-mcp:latest
+    container_name: euvd-mcp
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    restart: unless-stopped

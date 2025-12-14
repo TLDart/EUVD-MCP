@@ -1,0 +1,66 @@
+[tool.poetry]
+name = "euvd-mcp"
+version = "1.0.0"
+description = ""
+authors = ["Duarte Dias <me@duartedias.me>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+fastmcp = "^2.13.1"
+requests = "^2.31.0"
+urllib3 = "^2.0.0"
+pydantic-settings = "^2.0.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.0"
+pytest-cov = "^4.1.0"
+pytest-mock = "^3.11.1"
+responses = "^0.23.3"
+isort = "^5.12.0"
+flake8 = "^7.3.0"
+mypy = "^1.19.0"
+pylint = "^4.0.4"
+ruff = "^0.14.9"
+bandit = "^1.9.2"
+safety = "^3.7.0"
+pip-audit = "^2.10.0"
+black = "^25.12.0"
+pre-commit = "^3.8.0"
+pydocstyle = "^6.3.0"
+
+[tool.flake8]
+max-line-length = 127
+exclude = [".git", "__pycache__", ".venv", "venv", "build", "dist", ".tox", ".eggs", "*.egg"]
+ignore = ["E203", "E266", "E501", "W503"]
+max-complexity = 10
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+ignore_errors = true
+
+[tool.pytest.ini_options]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+testpaths = ["euvd_mcp/tests"]
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests",
+    "slow: Slow running tests"
+]
+addopts = "-v --strict-markers --tb=short"
+
+[tool.pydocstyle]
+ignore = ["D212", "D415"]
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
