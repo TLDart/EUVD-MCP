@@ -69,7 +69,7 @@ jobs:
           fi
 
       - name: Validate markdown
-        uses: nosborn/github-action-markdown-cli@v3.3.0
+        uses: nosborn/github-action-markdown-cli@v3.5.0
         with:
           files: .
           config_file: .markdownlint.json
