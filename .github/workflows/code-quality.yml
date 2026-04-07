@@ -2,20 +2,24 @@ name: Code Quality
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [main, develop]
   pull_request:
-    branches: [ main, develop ]
+    branches: [main, develop]
+
+env:
+  PYTHON_VERSION: '3.14'
 
 jobs:
-  code-quality:
+  lint:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: '3.12'
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install Poetry
         uses: snok/install-poetry@v1
@@ -25,52 +29,56 @@ jobs:
         with:
           path: ~/.cache/pypoetry
           key: ${{ runner.os }}-poetry-${{ hashFiles('**/poetry.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-poetry-
+          restore-keys: ${{ runner.os }}-poetry-
 
       - name: Install dependencies
         run: poetry install
 
-      - name: Run Black formatter check
-        run: |
-          poetry add --group dev black 2>/dev/null || true
-          poetry run black --check . || true
-        continue-on-error: true
+      - name: Ruff lint check
+        run: poetry run ruff check .
 
-      - name: Run isort import check
-        run: |
-          poetry add --group dev isort 2>/dev/null || true
-          poetry run isort --check-only . || true
-        continue-on-error: true
+      - name: Ruff format check
+        run: poetry run ruff format --check .
 
-      - name: Run Pylint
-        run: |
-          poetry add --group dev pylint 2>/dev/null || true
-          poetry run pylint --recursive=y . --exit-zero || true
-        continue-on-error: true
-
-      - name: Run Ruff linter
-        run: |
-          poetry add --group dev ruff 2>/dev/null || true
-          poetry run ruff check . || true
-        continue-on-error: true
-
-  documentation:
+  type-check:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check if README exists
-        run: |
-          if [ -f README.md ]; then
-            echo "✓ README.md found"
-          else
-            echo "✗ README.md not found"
-          fi
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+
+      - name: Cache Poetry dependencies
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/pypoetry
+          key: ${{ runner.os }}-poetry-${{ hashFiles('**/poetry.lock') }}
+          restore-keys: ${{ runner.os }}-poetry-
+
+      - name: Install dependencies
+        run: poetry install
+
+      - name: Type check with mypy
+        run: poetry run mypy euvd_mcp
+
+  documentation:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check README exists
+        run: test -f README.md
 
       - name: Validate markdown
         uses: nosborn/github-action-markdown-cli@v3.5.0
         with:
           files: .
           config_file: .markdownlint.json
-        continue-on-error: true
+        continue-on-error: true  # markdown style is informational, not a gate

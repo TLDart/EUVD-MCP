@@ -2,10 +2,8 @@
 Unit tests for the EUVD API Manager.
 """
 
-from unittest.mock import Mock
-
+import httpx
 import pytest
-import requests
 
 from euvd_mcp.controllers.euvd_api import EUVDAPIManager
 from euvd_mcp.models import Advisory, SearchResponse, Vulnerability
@@ -17,358 +15,364 @@ class TestEUVDAPIManagerInit:
     def test_api_manager_default_init(self):
         """Test initializing API manager with defaults."""
         manager = EUVDAPIManager()
-        assert manager.timeout > 0
-        assert manager.session is not None
+        assert manager._timeout > 0
+        assert manager._client is None  # lazy initialization
 
     def test_api_manager_custom_timeout(self):
         """Test initializing API manager with custom timeout."""
         manager = EUVDAPIManager(timeout=60)
-        assert manager.timeout == 60
+        assert manager._timeout == 60
 
     def test_api_manager_custom_retries(self):
         """Test initializing API manager with custom max retries."""
         manager = EUVDAPIManager(max_retries=5)
-        assert manager.session is not None
+        assert manager._max_retries == 5
 
-    def test_api_manager_session_headers(self):
-        """Test that session headers are properly set."""
+    def test_api_manager_custom_cache_ttl(self):
+        """Test initializing API manager with custom cache TTL."""
+        manager = EUVDAPIManager(cache_ttl=60)
+        assert manager._cache_ttl == 60
+
+    def test_get_client_creates_async_client(self):
+        """Test that _get_client creates an httpx.AsyncClient."""
         manager = EUVDAPIManager()
-        assert "User-Agent" in manager.session.headers
-        assert "Accept" in manager.session.headers
+        client = manager._get_client()
+        assert isinstance(client, httpx.AsyncClient)
+
+    def test_get_client_returns_same_instance(self):
+        """Test that _get_client returns the same client on repeated calls."""
+        manager = EUVDAPIManager()
+        assert manager._get_client() is manager._get_client()
+
+    def test_client_headers_are_set(self):
+        """Test that the HTTP client has the expected headers."""
+        manager = EUVDAPIManager()
+        client = manager._get_client()
+        assert "User-Agent" in client.headers
+        assert "Accept" in client.headers
 
 
 class TestEUVDAPIManagerRequests:
     """Test API request methods."""
 
-    def test_make_request_success(self, api_manager, mock_requests_get):
+    async def test_make_request_success(self, api_manager, httpx_mock):
         """Test successful API request."""
-        mock_response = Mock()
-        mock_response.json.return_value = {"id": "test"}
-        mock_response.raise_for_status = Mock()
-        mock_requests_get.return_value = mock_response
-
-        result = api_manager._make_request("/api/test")
+        httpx_mock.add_response(json={"id": "test"})
+        result = await api_manager._make_request("/api/test")
         assert result == {"id": "test"}
-        mock_requests_get.assert_called_once()
 
-    def test_make_request_with_params(self, api_manager, mock_requests_get):
+    async def test_make_request_with_params(self, api_manager, httpx_mock):
         """Test API request with query parameters."""
-        mock_response = Mock()
-        mock_response.json.return_value = {"results": []}
-        mock_response.raise_for_status = Mock()
-        mock_requests_get.return_value = mock_response
-
+        httpx_mock.add_response(json={"results": []})
         params = {"fromScore": 7.5, "toScore": 10}
-        result = api_manager._make_request("/api/search", params=params)
-
+        result = await api_manager._make_request("/api/search", params=params)
         assert result == {"results": []}
-        call_args = mock_requests_get.call_args
-        assert call_args.kwargs["params"] == params
+        sent = httpx_mock.get_requests()[0]
+        assert "fromScore=7.5" in str(sent.url)
 
-    def test_make_request_failure(self, api_manager, mock_requests_get):
-        """Test API request failure."""
-        mock_requests_get.side_effect = requests.exceptions.RequestException("Connection error")
+    async def test_make_request_transport_error(self, api_manager, httpx_mock):
+        """Test that transport errors are raised after retries."""
+        httpx_mock.add_exception(httpx.ConnectError("Connection refused"))
+        with pytest.raises(httpx.TransportError):
+            await api_manager._make_request("/api/test")
 
-        with pytest.raises(requests.exceptions.RequestException):
-            api_manager._make_request("/api/test")
+    async def test_make_request_http_status_error(self, api_manager, httpx_mock):
+        """Test that non-retryable HTTP errors are raised immediately."""
+        httpx_mock.add_response(status_code=404)
+        with pytest.raises(httpx.HTTPStatusError):
+            await api_manager._make_request("/api/test")
 
 
 class TestGetLastVulnerabilities:
     """Test get_last_vulnerabilities method."""
 
-    def test_get_last_vulnerabilities_success(self, api_manager, mock_requests_get, sample_vulnerabilities_list):
+    async def test_get_last_vulnerabilities_success(
+        self, api_manager, httpx_mock, sample_vulnerabilities_list
+    ):
         """Test successful retrieval of last vulnerabilities."""
-        mock_response = Mock()
-        mock_response.json.return_value = sample_vulnerabilities_list
-        mock_response.raise_for_status = Mock()
-        mock_requests_get.return_value = mock_response
-
-        result = api_manager.get_last_vulnerabilities()
-        # Result is VulnerabilityListResponse which is a list wrapped in ExploitedVulnerabilities
+        httpx_mock.add_response(json=sample_vulnerabilities_list)
+        result = await api_manager.get_last_vulnerabilities()
         assert result.list is not None
         assert len(result.list) == 2
-        mock_requests_get.assert_called_once()
 
-    def test_get_last_vulnerabilities_endpoint(self, api_manager, mock_requests_get, sample_vulnerabilities_list):
+    async def test_get_last_vulnerabilities_endpoint(
+        self, api_manager, httpx_mock, sample_vulnerabilities_list
+    ):
         """Test that correct endpoint is called."""
-        mock_response = Mock()
-        mock_response.json.return_value = sample_vulnerabilities_list
-        mock_response.raise_for_status = Mock()
-        mock_requests_get.return_value = mock_response
+        httpx_mock.add_response(json=sample_vulnerabilities_list)
+        await api_manager.get_last_vulnerabilities()
+        assert "/api/lastvulnerabilities" in str(httpx_mock.get_requests()[0].url)
 
-        api_manager.get_last_vulnerabilities()
+    async def test_get_last_vulnerabilities_cached(
+        self, api_manager, httpx_mock, sample_vulnerabilities_list
+    ):
+        """Test that second call returns cached result without a new request."""
+        httpx_mock.add_response(json=sample_vulnerabilities_list)
+        result1 = await api_manager.get_last_vulnerabilities()
+        result2 = await api_manager.get_last_vulnerabilities()
+        assert result1 is result2
+        assert len(httpx_mock.get_requests()) == 1
 
-        call_args = mock_requests_get.call_args
-        assert "/api/lastvulnerabilities" in call_args[0][0]
+    async def test_get_last_vulnerabilities_cache_miss_after_expiry(
+        self, httpx_mock, sample_vulnerabilities_list
+    ):
+        """Test that an expired cache entry triggers a new request."""
+        manager = EUVDAPIManager(timeout=10, max_retries=0, cache_ttl=0)
+        httpx_mock.add_response(json=sample_vulnerabilities_list)
+        httpx_mock.add_response(json=sample_vulnerabilities_list)
+        await manager.get_last_vulnerabilities()
+        await manager.get_last_vulnerabilities()
+        assert len(httpx_mock.get_requests()) == 2
 
 
 class TestGetExploitedVulnerabilities:
     """Test get_exploited_vulnerabilities method."""
 
-    def test_get_exploited_vulnerabilities_success(self, api_manager, mock_requests_get, sample_vulnerabilities_list):
+    async def test_get_exploited_vulnerabilities_success(
+        self, api_manager, httpx_mock, sample_vulnerabilities_list
+    ):
         """Test successful retrieval of exploited vulnerabilities."""
-        mock_response = Mock()
-        mock_response.json.return_value = sample_vulnerabilities_list
-        mock_response.raise_for_status = Mock()
-        mock_requests_get.return_value = mock_response
-
-        result = api_manager.get_exploited_vulnerabilities()
+        httpx_mock.add_response(json=sample_vulnerabilities_list)
+        result = await api_manager.get_exploited_vulnerabilities()
         assert result.list is not None
         assert len(result.list) == 2
 
-    def test_get_exploited_vulnerabilities_endpoint(self, api_manager, mock_requests_get, sample_vulnerabilities_list):
+    async def test_get_exploited_vulnerabilities_endpoint(
+        self, api_manager, httpx_mock, sample_vulnerabilities_list
+    ):
         """Test that correct endpoint is called."""
-        mock_response = Mock()
-        mock_response.json.return_value = sample_vulnerabilities_list
-        mock_response.raise_for_status = Mock()
-        mock_requests_get.return_value = mock_response
+        httpx_mock.add_response(json=sample_vulnerabilities_list)
+        await api_manager.get_exploited_vulnerabilities()
+        assert "/api/exploitedvulnerabilities" in str(httpx_mock.get_requests()[0].url)
 
-        api_manager.get_exploited_vulnerabilities()
-
-        call_args = mock_requests_get.call_args
-        assert "/api/exploitedvulnerabilities" in call_args[0][0]
+    async def test_get_exploited_vulnerabilities_cached(
+        self, api_manager, httpx_mock, sample_vulnerabilities_list
+    ):
+        """Test that the response is served from cache on repeat calls."""
+        httpx_mock.add_response(json=sample_vulnerabilities_list)
+        r1 = await api_manager.get_exploited_vulnerabilities()
+        r2 = await api_manager.get_exploited_vulnerabilities()
+        assert r1 is r2
+        assert len(httpx_mock.get_requests()) == 1
 
 
 class TestGetCriticalVulnerabilities:
     """Test get_critical_vulnerabilities method."""
 
-    def test_get_critical_vulnerabilities_success(self, api_manager, mock_requests_get, sample_vulnerabilities_list):
+    async def test_get_critical_vulnerabilities_success(
+        self, api_manager, httpx_mock, sample_vulnerabilities_list
+    ):
         """Test successful retrieval of critical vulnerabilities."""
-        mock_response = Mock()
-        mock_response.json.return_value = sample_vulnerabilities_list
-        mock_response.raise_for_status = Mock()
-        mock_requests_get.return_value = mock_response
-
-        result = api_manager.get_critical_vulnerabilities()
+        httpx_mock.add_response(json=sample_vulnerabilities_list)
+        result = await api_manager.get_critical_vulnerabilities()
         assert result.list is not None
         assert len(result.list) == 2
 
-    def test_get_critical_vulnerabilities_endpoint(self, api_manager, mock_requests_get, sample_vulnerabilities_list):
+    async def test_get_critical_vulnerabilities_endpoint(
+        self, api_manager, httpx_mock, sample_vulnerabilities_list
+    ):
         """Test that correct endpoint is called."""
-        mock_response = Mock()
-        mock_response.json.return_value = sample_vulnerabilities_list
-        mock_response.raise_for_status = Mock()
-        mock_requests_get.return_value = mock_response
+        httpx_mock.add_response(json=sample_vulnerabilities_list)
+        await api_manager.get_critical_vulnerabilities()
+        assert "/api/criticalvulnerabilities" in str(httpx_mock.get_requests()[0].url)
 
-        api_manager.get_critical_vulnerabilities()
-
-        call_args = mock_requests_get.call_args
-        assert "/api/criticalvulnerabilities" in call_args[0][0]
+    async def test_get_critical_vulnerabilities_cached(
+        self, api_manager, httpx_mock, sample_vulnerabilities_list
+    ):
+        """Test that the response is served from cache on repeat calls."""
+        httpx_mock.add_response(json=sample_vulnerabilities_list)
+        r1 = await api_manager.get_critical_vulnerabilities()
+        r2 = await api_manager.get_critical_vulnerabilities()
+        assert r1 is r2
+        assert len(httpx_mock.get_requests()) == 1
 
 
 class TestSearchVulnerabilities:
     """Test search_vulnerabilities method."""
 
-    def test_search_vulnerabilities_no_filters(self, api_manager, mock_requests_get, sample_search_response):
+    async def test_search_vulnerabilities_no_filters(
+        self, api_manager, httpx_mock, sample_search_response
+    ):
         """Test search with no filters."""
-        mock_response = Mock()
-        mock_response.json.return_value = sample_search_response
-        mock_response.raise_for_status = Mock()
-        mock_requests_get.return_value = mock_response
-
-        result = api_manager.search_vulnerabilities()
+        httpx_mock.add_response(json=sample_search_response)
+        result = await api_manager.search_vulnerabilities()
         assert isinstance(result, SearchResponse)
         assert result.total_elements == 100
 
-    def test_search_vulnerabilities_with_score_filter(self, api_manager, mock_requests_get, sample_search_response):
+    async def test_search_vulnerabilities_with_score_filter(
+        self, api_manager, httpx_mock, sample_search_response
+    ):
         """Test search with CVSS score filters."""
-        mock_response = Mock()
-        mock_response.json.return_value = sample_search_response
-        mock_response.raise_for_status = Mock()
-        mock_requests_get.return_value = mock_response
+        httpx_mock.add_response(json=sample_search_response)
+        await api_manager.search_vulnerabilities(from_score=7.5, to_score=10)
+        url = str(httpx_mock.get_requests()[0].url)
+        assert "fromScore=7.5" in url
+        assert "toScore=10" in url
 
-        result = api_manager.search_vulnerabilities(from_score=7.5, to_score=10)
-        assert isinstance(result, SearchResponse)
-
-        call_args = mock_requests_get.call_args
-        params = call_args.kwargs["params"]
-        assert params["fromScore"] == 7.5
-        assert params["toScore"] == 10
-
-    def test_search_vulnerabilities_with_epss_filter(self, api_manager, mock_requests_get, sample_search_response):
+    async def test_search_vulnerabilities_with_epss_filter(
+        self, api_manager, httpx_mock, sample_search_response
+    ):
         """Test search with EPSS score filters."""
-        mock_response = Mock()
-        mock_response.json.return_value = sample_search_response
-        mock_response.raise_for_status = Mock()
-        mock_requests_get.return_value = mock_response
+        httpx_mock.add_response(json=sample_search_response)
+        await api_manager.search_vulnerabilities(from_epss=50, to_epss=100)
+        url = str(httpx_mock.get_requests()[0].url)
+        assert "fromEpss=50" in url
+        assert "toEpss=100" in url
 
-        api_manager.search_vulnerabilities(from_epss=50, to_epss=100)
-
-        call_args = mock_requests_get.call_args
-        params = call_args.kwargs["params"]
-        assert params["fromEpss"] == 50
-        assert params["toEpss"] == 100
-
-    def test_search_vulnerabilities_with_date_filter(self, api_manager, mock_requests_get, sample_search_response):
+    async def test_search_vulnerabilities_with_date_filter(
+        self, api_manager, httpx_mock, sample_search_response
+    ):
         """Test search with date filters."""
-        mock_response = Mock()
-        mock_response.json.return_value = sample_search_response
-        mock_response.raise_for_status = Mock()
-        mock_requests_get.return_value = mock_response
+        httpx_mock.add_response(json=sample_search_response)
+        await api_manager.search_vulnerabilities(
+            from_date="2024-01-01", to_date="2024-12-31"
+        )
+        url = str(httpx_mock.get_requests()[0].url)
+        assert "fromDate=2024-01-01" in url
+        assert "toDate=2024-12-31" in url
 
-        api_manager.search_vulnerabilities(from_date="2024-01-01", to_date="2024-12-31")
-
-        call_args = mock_requests_get.call_args
-        params = call_args.kwargs["params"]
-        assert params["fromDate"] == "2024-01-01"
-        assert params["toDate"] == "2024-12-31"
-
-    def test_search_vulnerabilities_with_text_filter(self, api_manager, mock_requests_get, sample_search_response):
+    async def test_search_vulnerabilities_with_text_filter(
+        self, api_manager, httpx_mock, sample_search_response
+    ):
         """Test search with text/keyword filter."""
-        mock_response = Mock()
-        mock_response.json.return_value = sample_search_response
-        mock_response.raise_for_status = Mock()
-        mock_requests_get.return_value = mock_response
+        httpx_mock.add_response(json=sample_search_response)
+        await api_manager.search_vulnerabilities(text="Windows")
+        assert "text=Windows" in str(httpx_mock.get_requests()[0].url)
 
-        api_manager.search_vulnerabilities(text="Windows")
-
-        call_args = mock_requests_get.call_args
-        params = call_args.kwargs["params"]
-        assert params["text"] == "Windows"
-
-    def test_search_vulnerabilities_with_exploited_filter(self, api_manager, mock_requests_get, sample_search_response):
+    async def test_search_vulnerabilities_with_exploited_filter(
+        self, api_manager, httpx_mock, sample_search_response
+    ):
         """Test search with exploited status filter."""
-        mock_response = Mock()
-        mock_response.json.return_value = sample_search_response
-        mock_response.raise_for_status = Mock()
-        mock_requests_get.return_value = mock_response
+        httpx_mock.add_response(json=sample_search_response)
+        await api_manager.search_vulnerabilities(exploited=True)
+        assert "exploited=true" in str(httpx_mock.get_requests()[0].url)
 
-        api_manager.search_vulnerabilities(exploited=True)
-
-        call_args = mock_requests_get.call_args
-        params = call_args.kwargs["params"]
-        assert params["exploited"] == "true"
-
-    def test_search_vulnerabilities_with_pagination(self, api_manager, mock_requests_get, sample_search_response):
+    async def test_search_vulnerabilities_with_pagination(
+        self, api_manager, httpx_mock, sample_search_response
+    ):
         """Test search with pagination."""
-        mock_response = Mock()
-        mock_response.json.return_value = sample_search_response
-        mock_response.raise_for_status = Mock()
-        mock_requests_get.return_value = mock_response
+        httpx_mock.add_response(json=sample_search_response)
+        await api_manager.search_vulnerabilities(page=1, size=20)
+        url = str(httpx_mock.get_requests()[0].url)
+        assert "page=1" in url
+        assert "size=20" in url
 
-        api_manager.search_vulnerabilities(page=1, size=20)
-
-        call_args = mock_requests_get.call_args
-        params = call_args.kwargs["params"]
-        assert params["page"] == 1
-        assert params["size"] == 20
-
-    def test_search_vulnerabilities_endpoint(self, api_manager, mock_requests_get, sample_search_response):
+    async def test_search_vulnerabilities_endpoint(
+        self, api_manager, httpx_mock, sample_search_response
+    ):
         """Test that correct endpoint is called."""
-        mock_response = Mock()
-        mock_response.json.return_value = sample_search_response
-        mock_response.raise_for_status = Mock()
-        mock_requests_get.return_value = mock_response
-
-        api_manager.search_vulnerabilities()
-
-        call_args = mock_requests_get.call_args
-        assert "/api/search" in call_args[0][0]
+        httpx_mock.add_response(json=sample_search_response)
+        await api_manager.search_vulnerabilities()
+        assert "/api/search" in str(httpx_mock.get_requests()[0].url)
 
 
 class TestGetVulnerabilityById:
     """Test get_vulnerability_by_id method."""
 
-    def test_get_vulnerability_by_id_success(self, api_manager, mock_requests_get, sample_vulnerability):
+    async def test_get_vulnerability_by_id_success(
+        self, api_manager, httpx_mock, sample_vulnerability
+    ):
         """Test successful retrieval of a vulnerability by ID."""
-        mock_response = Mock()
-        mock_response.json.return_value = sample_vulnerability
-        mock_response.raise_for_status = Mock()
-        mock_requests_get.return_value = mock_response
-
-        result = api_manager.get_vulnerability_by_id("EUVD-2024-45012")
+        httpx_mock.add_response(json=sample_vulnerability)
+        result = await api_manager.get_vulnerability_by_id("EUVD-2024-45012")
         assert isinstance(result, Vulnerability)
         assert result.id == "EUVD-2024-45012"
 
-    def test_get_vulnerability_by_id_endpoint(self, api_manager, mock_requests_get, sample_vulnerability):
+    async def test_get_vulnerability_by_id_endpoint(
+        self, api_manager, httpx_mock, sample_vulnerability
+    ):
         """Test that correct endpoint is called with ID parameter."""
-        mock_response = Mock()
-        mock_response.json.return_value = sample_vulnerability
-        mock_response.raise_for_status = Mock()
-        mock_requests_get.return_value = mock_response
+        httpx_mock.add_response(json=sample_vulnerability)
+        await api_manager.get_vulnerability_by_id("EUVD-2024-45012")
+        url = str(httpx_mock.get_requests()[0].url)
+        assert "/api/enisaid" in url
+        assert "id=EUVD-2024-45012" in url
 
-        api_manager.get_vulnerability_by_id("EUVD-2024-45012")
-
-        call_args = mock_requests_get.call_args
-        assert "/api/enisaid" in call_args[0][0]
-        params = call_args.kwargs["params"]
-        assert params["id"] == "EUVD-2024-45012"
-
-    def test_get_vulnerability_by_id_not_found(self, api_manager, mock_requests_get):
-        """Test handling of not found vulnerability."""
-        mock_requests_get.side_effect = requests.exceptions.RequestException("404 Not Found")
-
-        with pytest.raises(requests.exceptions.RequestException):
-            api_manager.get_vulnerability_by_id("INVALID-ID")
+    async def test_get_vulnerability_by_id_not_found(self, api_manager, httpx_mock):
+        """Test handling of not-found vulnerability."""
+        httpx_mock.add_response(status_code=404)
+        with pytest.raises(httpx.HTTPStatusError):
+            await api_manager.get_vulnerability_by_id("EUVD-9999-99999")
 
 
 class TestGetAdvisoryById:
     """Test get_advisory_by_id method."""
 
-    def test_get_advisory_by_id_success(self, api_manager, mock_requests_get, sample_advisory):
+    async def test_get_advisory_by_id_success(
+        self, api_manager, httpx_mock, sample_advisory
+    ):
         """Test successful retrieval of an advisory by ID."""
-        mock_response = Mock()
-        mock_response.json.return_value = sample_advisory
-        mock_response.raise_for_status = Mock()
-        mock_requests_get.return_value = mock_response
-
-        result = api_manager.get_advisory_by_id("cisco-sa-ata19x-multi-RDTEqRsy")
+        httpx_mock.add_response(json=sample_advisory)
+        result = await api_manager.get_advisory_by_id("cisco-sa-ata19x-multi-RDTEqRsy")
         assert isinstance(result, Advisory)
         assert result.id == "cisco-sa-ata19x-multi-RDTEqRsy"
 
-    def test_get_advisory_by_id_endpoint(self, api_manager, mock_requests_get, sample_advisory):
+    async def test_get_advisory_by_id_endpoint(
+        self, api_manager, httpx_mock, sample_advisory
+    ):
         """Test that correct endpoint is called with advisory ID parameter."""
-        mock_response = Mock()
-        mock_response.json.return_value = sample_advisory
-        mock_response.raise_for_status = Mock()
-        mock_requests_get.return_value = mock_response
-
-        api_manager.get_advisory_by_id("test-advisory-001")
-
-        call_args = mock_requests_get.call_args
-        assert "/api/advisory" in call_args[0][0]
-        params = call_args.kwargs["params"]
-        assert params["id"] == "test-advisory-001"
+        httpx_mock.add_response(json=sample_advisory)
+        await api_manager.get_advisory_by_id("test-advisory-001")
+        url = str(httpx_mock.get_requests()[0].url)
+        assert "/api/advisory" in url
+        assert "id=test-advisory-001" in url
 
 
-class TestContextManager:
-    """Test EUVDAPIManager as a context manager."""
+class TestAsyncContextManager:
+    """Test EUVDAPIManager as an async context manager."""
 
-    def test_context_manager_enter(self):
-        """Test entering context manager."""
-        with EUVDAPIManager() as manager:
+    async def test_context_manager_enter(self):
+        """Test entering async context manager."""
+        async with EUVDAPIManager() as manager:
             assert manager is not None
-            assert manager.session is not None
 
-    def test_context_manager_exit(self):
-        """Test exiting context manager."""
-        manager = EUVDAPIManager()
-        with manager:
-            _ = manager.session
-        # Verify session is closed
-        assert manager.session is not None  # Session object still exists
+    async def test_context_manager_closes_client(self):
+        """Test that client is closed on context manager exit."""
+        async with EUVDAPIManager() as manager:
+            _ = manager._get_client()  # force client creation
+            assert manager._client is not None
+        assert manager._client is None
 
-    def test_close_method(self):
-        """Test close method."""
-        manager = EUVDAPIManager()
-        manager.close()
-        # Manager should be cleanly closed
-        assert manager.session is not None  # Session object still exists after close
+    async def test_close_method(self, api_manager):
+        """Test close method releases the client."""
+        _ = api_manager._get_client()
+        await api_manager.close()
+        assert api_manager._client is None
 
 
-class TestAPIManagerErrorHandling:
-    """Test error handling in API manager."""
+class TestRetryBehavior:
+    """Test retry logic in _make_request."""
 
-    def test_request_timeout(self, api_manager, mock_requests_get):
-        """Test handling of request timeout."""
-        mock_requests_get.side_effect = requests.exceptions.Timeout("Request timed out")
+    async def test_retries_on_retryable_status(self, httpx_mock):
+        """Test that retryable status codes trigger a retry."""
+        manager = EUVDAPIManager(timeout=10, max_retries=1, cache_ttl=0)
+        httpx_mock.add_response(status_code=503)
+        httpx_mock.add_response(json={"ok": True})
+        result = await manager._make_request("/api/test")
+        assert result == {"ok": True}
+        assert len(httpx_mock.get_requests()) == 2
 
-        with pytest.raises(requests.exceptions.RequestException):
-            api_manager._make_request("/api/test")
+    async def test_no_retry_on_client_error(self, httpx_mock):
+        """Test that 4xx client errors are not retried."""
+        manager = EUVDAPIManager(timeout=10, max_retries=2, cache_ttl=0)
+        httpx_mock.add_response(status_code=400)
+        with pytest.raises(httpx.HTTPStatusError):
+            await manager._make_request("/api/test")
+        assert len(httpx_mock.get_requests()) == 1
 
-    def test_request_connection_error(self, api_manager, mock_requests_get):
-        """Test handling of connection error."""
-        mock_requests_get.side_effect = requests.exceptions.ConnectionError("Connection refused")
+    async def test_retries_on_transport_error(self, httpx_mock):
+        """Test that transport errors are retried."""
+        manager = EUVDAPIManager(timeout=10, max_retries=1, cache_ttl=0)
+        httpx_mock.add_exception(httpx.ConnectError("refused"))
+        httpx_mock.add_response(json={"ok": True})
+        result = await manager._make_request("/api/test")
+        assert result == {"ok": True}
 
-        with pytest.raises(requests.exceptions.RequestException):
-            api_manager._make_request("/api/test")
+    async def test_raises_after_all_retries_exhausted(self, httpx_mock):
+        """Test that exception is raised after all retries are exhausted."""
+        manager = EUVDAPIManager(timeout=10, max_retries=1, cache_ttl=0)
+        httpx_mock.add_exception(httpx.ConnectError("refused"))
+        httpx_mock.add_exception(httpx.ConnectError("refused"))
+        with pytest.raises(httpx.TransportError):
+            await manager._make_request("/api/test")
+        assert len(httpx_mock.get_requests()) == 2

@@ -6,11 +6,10 @@
 repos:
   # Code formatting
   - repo: https://github.com/psf/black
-    rev: 25.1.0
+    rev: 26.3.1
     hooks:
       - id: black
-        language_version: python3.12
-        args: ["--line-length=127"]
+        language_version: python3.14
 
   # Import sorting
   - repo: https://github.com/PyCQA/isort
@@ -44,6 +43,7 @@ repos:
           - pydantic-settings
           - types-requests
           - types-urllib3
+          - types-cachetools
         exclude: "^euvd_mcp/tests/"
 
   # Security checks
@@ -73,7 +73,6 @@ repos:
     hooks:
       - id: pydocstyle
         exclude: "^euvd_mcp/tests/"
-        args: ["--ignore=D400,D212, D415,D203,D200"]
 
 # Local hooks for comprehensive testing
   - repo: local
@@ -115,7 +114,7 @@ repos:
 
 # Configuration
 default_language_version:
-  python: "3.12"
+  python: "3.14"
 
 # Fail fast on first error
 fail_fast: false

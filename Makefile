@@ -1,134 +1,155 @@
-.PHONY: help install dev test lint format security docker clean
+.PHONY: help install dev pre-commit-setup pre-commit-run \
+        test test-cov \
+        lint lint-ruff lint-mypy \
+        format format-check \
+        security security-bandit audit \
+        docker-build docker-run \
+        compose-up compose-down compose-logs \
+        clean clean-all \
+        check-env
 
-# Variables
-PYTHON := python3
-POETRY := poetry
-DOCKER := docker
+# ── Variables ──────────────────────────────────────────────────────────────────
+
+POETRY  := poetry
+DOCKER  := docker
 COMPOSE := docker-compose
+IMAGE   := euvd-mcp:local
+
+# ── Help ───────────────────────────────────────────────────────────────────────
 
 help:
 	@echo "EUVD-MCP Development Commands"
 	@echo ""
 	@echo "Setup:"
-	@echo "  make install          Install dependencies"
-	@echo "  make dev              Install dev dependencies"
-	@echo "  make pre-commit-setup Install pre-commit hooks"
+	@echo "  make install           Install production dependencies"
+	@echo "  make dev               Install all dependencies (incl. dev)"
+	@echo "  make pre-commit-setup  Install pre-commit hooks"
+	@echo ""
+	@echo "Testing:"
+	@echo "  make test              Run tests"
+	@echo "  make test-cov          Run tests with HTML + terminal coverage report"
 	@echo ""
 	@echo "Code Quality:"
-	@echo "  make lint             Run all linters"
-	@echo "  make format           Format code with Black and isort"
-	@echo "  make test             Run tests"
-	@echo "  make coverage         Generate coverage report"
-	@echo "  make pre-commit       Run pre-commit checks on all files"
+	@echo "  make lint              Run ruff lint + mypy"
+	@echo "  make format            Auto-format code with ruff"
+	@echo "  make format-check      Check formatting without modifying files"
+	@echo "  make pre-commit-run    Run all pre-commit hooks on every file"
 	@echo ""
 	@echo "Security:"
-	@echo "  make security         Run security checks"
-	@echo "  make audit            Audit dependencies"
+	@echo "  make security          Run bandit + pip-audit"
 	@echo ""
 	@echo "Docker:"
-	@echo "  make docker-build     Build Docker image"
-	@echo "  make docker-run       Run Docker container"
-	@echo "  make compose-up       Start with docker-compose"
-	@echo "  make compose-down     Stop docker-compose"
+	@echo "  make docker-build      Build Docker image ($(IMAGE))"
+	@echo "  make docker-run        Run container — requires .env file for configuration"
+	@echo "  make compose-up        Start with docker-compose (reads .env automatically)"
+	@echo "  make compose-down      Stop docker-compose"
+	@echo "  make compose-logs      Tail docker-compose logs"
 	@echo ""
 	@echo "Cleanup:"
-	@echo "  make clean            Remove build artifacts"
-	@echo "  make clean-all        Remove all artifacts including venv"
+	@echo "  make clean             Remove build / cache artifacts"
+	@echo "  make clean-all         Remove build artifacts and virtual environment"
+	@echo ""
+	@echo "Note: The Docker image does NOT contain .env."
+	@echo "      Configuration is injected at runtime via --env-file or -e flags."
+
+# ── Setup ──────────────────────────────────────────────────────────────────────
 
 install:
-	@echo "Installing dependencies..."
-	$(POETRY) install
+	@echo "Installing production dependencies..."
+	$(POETRY) install --only main
 
 dev:
-	@echo "Installing dev dependencies..."
+	@echo "Installing all dependencies..."
 	$(POETRY) install
-	$(POETRY) add --group dev flake8 mypy black isort pytest pytest-cov pylint ruff bandit safety pip-audit pre-commit pydocstyle
 
 pre-commit-setup:
-	@echo "Setting up pre-commit hooks..."
+	@echo "Installing pre-commit hooks..."
 	$(POETRY) run pre-commit install
-	@echo "Pre-commit hooks installed!"
+	@echo "Pre-commit hooks installed."
 
 pre-commit-run:
 	@echo "Running pre-commit on all files..."
 	$(POETRY) run pre-commit run --all-files
 
+# ── Testing ────────────────────────────────────────────────────────────────────
+
 test:
 	@echo "Running tests..."
-	$(POETRY) run pytest euvd_mcp/tests/ -v
+	$(POETRY) run pytest
 
 test-cov:
 	@echo "Running tests with coverage..."
-	$(POETRY) run pytest euvd_mcp/tests/ -v --cov=euvd_mcp --cov-report=html --cov-report=term
-	@echo "Coverage report generated in htmlcov/index.html"
+	$(POETRY) run pytest --cov=euvd_mcp --cov-report=html --cov-report=term
+	@echo "HTML report: htmlcov/index.html"
 
-lint: lint-flake8 lint-mypy lint-pylint lint-ruff
+# ── Code quality ───────────────────────────────────────────────────────────────
 
-lint-flake8:
-	@echo "Running Flake8..."
-	$(POETRY) run flake8 . || true
-
-lint-mypy:
-	@echo "Running MyPy..."
-	$(POETRY) run mypy . --ignore-missing-imports || true
-
-lint-pylint:
-	@echo "Running Pylint..."
-	$(POETRY) run pylint --recursive=y . --exit-zero || true
+lint: lint-ruff lint-mypy
 
 lint-ruff:
-	@echo "Running Ruff..."
-	$(POETRY) run ruff check . || true
+	@echo "Ruff lint..."
+	$(POETRY) run ruff check .
+
+lint-mypy:
+	@echo "Mypy type check..."
+	$(POETRY) run mypy euvd_mcp
 
 format:
 	@echo "Formatting code..."
-	$(POETRY) run black .
-	$(POETRY) run isort .
-	@echo "Code formatted!"
+	$(POETRY) run ruff format .
+	$(POETRY) run ruff check --fix .
+	@echo "Done."
 
 format-check:
-	@echo "Checking code format..."
-	$(POETRY) run black --check .
-	$(POETRY) run isort --check-only .
+	@echo "Checking formatting..."
+	$(POETRY) run ruff format --check .
+	$(POETRY) run ruff check .
 
-security: security-bandit security-safety audit
+# ── Security ───────────────────────────────────────────────────────────────────
+
+security: security-bandit audit
 
 security-bandit:
-	@echo "Running Bandit security check..."
-	$(POETRY) run bandit -r . -ll || true
-
-security-safety:
-	@echo "Running Safety vulnerability check..."
-	$(POETRY) run safety scan --json || true
+	@echo "Bandit security scan (medium severity and above)..."
+	$(POETRY) run bandit -r euvd_mcp -ll
 
 audit:
-	@echo "Running pip-audit..."
-	$(POETRY) run pip-audit || true
+	@echo "pip-audit dependency audit..."
+	$(POETRY) run pip-audit
 
-type-check:
-	@echo "Running type checks..."
-	$(POETRY) run mypy . --ignore-missing-imports
+# ── Docker ─────────────────────────────────────────────────────────────────────
+
+# Guard: abort with a clear message if .env is missing.
+# The image does not embed .env — configuration must be supplied at runtime.
+check-env:
+	@test -f .env || { \
+		echo ""; \
+		echo "ERROR: .env file not found."; \
+		echo "       Create one from .env.example and configure it before running the container."; \
+		echo ""; \
+		exit 1; \
+	}
 
 docker-build:
-	@echo "Building Docker image..."
-	$(DOCKER) build -t euvd-mcp:local .
-	@echo "Docker image built: euvd-mcp:local"
+	@echo "Building Docker image ($(IMAGE))..."
+	$(DOCKER) build -t $(IMAGE) .
+	@echo "Built: $(IMAGE)"
 
-docker-run:
-	@echo "Running Docker container..."
-	$(DOCKER) run -p 8000:8000 --env-file .env euvd-mcp:local python -m euvd_mcp.main
+docker-run: check-env
+	@echo "Running container (config from .env)..."
+	$(DOCKER) run --rm -p 8000:8000 --env-file .env $(IMAGE)
 
-compose-up:
+compose-up: check-env
 	@echo "Starting with docker-compose..."
 	$(COMPOSE) up
 
 compose-down:
-	@echo "Stopping docker-compose..."
 	$(COMPOSE) down
 
 compose-logs:
-	@echo "Following docker-compose logs..."
 	$(COMPOSE) logs -f
+
+# ── Cleanup ────────────────────────────────────────────────────────────────────
 
 clean:
 	@echo "Cleaning build artifacts..."
@@ -138,19 +159,12 @@ clean:
 	find . -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name ".mypy_cache" -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name "htmlcov" -exec rm -rf {} + 2>/dev/null || true
-	rm -f .coverage
-	rm -f coverage.xml
-	@echo "Cleaned!"
+	rm -f .coverage coverage.xml
+	@echo "Done."
 
 clean-all: clean
 	@echo "Removing virtual environment..."
 	rm -rf .venv
-	@echo "All cleaned!"
-
-pre-commit: format lint test
-	@echo "Pre-commit checks passed! Ready to commit."
-
-ci-local: clean lint test coverage security
-	@echo "All CI checks passed locally!"
+	@echo "Done."
 
 .DEFAULT_GOAL := help

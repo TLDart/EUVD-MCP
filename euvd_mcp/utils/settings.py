@@ -4,13 +4,19 @@ Application settings using Pydantic Settings.
 Loads configuration from environment variables and .env file.
 """
 
-from pydantic_settings import BaseSettings
+from pathlib import Path
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_ENV_FILE = Path(__file__).parent.parent.parent / ".env"
 
 
 class Settings(BaseSettings):
     """Application configuration settings."""
 
     # Application Configuration
+    # Transport mode: "http" for standalone/Docker, "stdio" for subprocess (e.g. Claude Desktop)
+    transport: str = "http"
     host: str = "127.0.0.1"
     port: int = 8000
 
@@ -19,17 +25,22 @@ class Settings(BaseSettings):
     euvd_timeout: int = 30
     euvd_max_retries: int = 3
 
+    # Cache TTL in seconds for the latest/exploited/critical endpoints
+    cache_ttl: int = 30
+    # Maximum number of entries in the response cache
+    cache_max_size: int = 128
+
+    # Logging level (DEBUG, INFO, WARNING, ERROR)
+    log_level: str = "INFO"
+
     # User Agent for API Requests
-    user_agent: str = (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    user_agent: str = "euvd-mcp-tool"
+
+    model_config = SettingsConfigDict(
+        env_file=_ENV_FILE,
+        env_file_encoding="utf-8",
+        case_sensitive=False,
     )
-
-    class Config:
-        """Pydantic settings configuration."""
-
-        env_file = "../.env"
-        env_file_encoding = "utf-8"
-        case_sensitive = False
 
 
 # Create a singleton instance

@@ -1,1 +1,1 @@
-"""EUVD MCP Package"""
+"""EUVD MCP Package."""

@@ -134,3 +134,4 @@ build/
 *$py.class
 *.py[cod]
 __pycache__/
+opencode.json

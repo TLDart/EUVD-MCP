@@ -95,7 +95,9 @@ class TestExploitedVulnerabilities:
         assert len(response.list) == 2
         assert response.list[0].id == "EUVD-2024-45012"
 
-    def test_exploited_vulnerabilities_json_serialization(self, sample_vulnerabilities_list):
+    def test_exploited_vulnerabilities_json_serialization(
+        self, sample_vulnerabilities_list
+    ):
         """Test serializing ExploitedVulnerabilities to JSON."""
         response = ExploitedVulnerabilities(list=sample_vulnerabilities_list)
         json_data = response.model_dump(mode="json")

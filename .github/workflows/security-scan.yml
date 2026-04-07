@@ -2,7 +2,7 @@ name: Security Scan
 
 on:
   pull_request:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -15,33 +15,31 @@ jobs:
       pull-requests: read
 
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-    - name: Build Docker image
-      uses: docker/build-push-action@v4
-      with:
-        context: .
-        push: false
-        load: true
-        tags: security-scan-image:latest
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+      - name: Build Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: false
+          load: true
+          tags: security-scan-image:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-    - name: Run Trivy vulnerability scanner
-      uses: aquasecurity/trivy-action@0.33.1
-      with:
-        image-ref: security-scan-image:latest
-        format: 'sarif'
-        output: 'trivy-results.sarif'
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          image-ref: security-scan-image:latest
+          format: 'sarif'
+          output: 'trivy-results.sarif'
 
-    - name: Upload Trivy results to GitHub Security tab
-      uses: github/codeql-action/upload-sarif@v4
-      # For PRs from forks, upload may fail due to restricted permissions
-      # The scan still runs and results are visible in the workflow logs
-      continue-on-error: true
-      with:
-        sarif_file: 'trivy-results.sarif'
-        category: 'trivy-container-scan'
+      - name: Upload Trivy results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: 'trivy-results.sarif'
+          category: 'trivy-container-scan'
+        continue-on-error: true  # fork PRs lack write permission to security-events; scan still runs and results are in the workflow logs

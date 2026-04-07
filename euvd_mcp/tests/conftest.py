@@ -5,7 +5,6 @@ Defines fixtures and configuration for all tests.
 """
 
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -89,19 +88,6 @@ def sample_advisory():
 
 
 @pytest.fixture
-def mock_api_manager(mocker):
-    """Return a mocked API manager."""
-    manager = MagicMock(spec=EUVDAPIManager)
-    return manager
-
-
-@pytest.fixture
 def api_manager():
-    """Return a real API manager instance for unit tests."""
-    return EUVDAPIManager(timeout=10, max_retries=1)
-
-
-@pytest.fixture
-def mock_requests_get(mocker):
-    """Return a mocked requests.get function."""
-    return mocker.patch("euvd_mcp.controllers.euvd_api.requests.Session.get")
+    """Return an API manager instance with retries disabled for unit tests."""
+    return EUVDAPIManager(timeout=10, max_retries=0)
