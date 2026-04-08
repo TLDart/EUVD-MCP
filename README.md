@@ -8,8 +8,11 @@ MCP server for the [European Union Vulnerability Database](https://euvdservices.
 - Get latest, critical, and exploited vulnerabilities
 - Lookup specific vulnerabilities and advisories by ID
 - Automatic retries with exponential backoff
-- In-memory TTL cache for list endpoints
-- Structured logging
+- Bounded TTL cache (`cachetools.TTLCache`) for list endpoints
+- Structured logging (always to stderr — safe for stdio transport)
+- `/health` liveness endpoint and `/metrics` observability endpoint (HTTP mode)
+- Startup connectivity check to the EUVD API
+- Two transport modes: **HTTP** (standalone/Docker) and **stdio** (subprocess/Claude Desktop)
 
 ## Requirements
 
@@ -27,7 +30,7 @@ poetry install
 Copy the example environment file and adjust as needed:
 
 ```bash
-cp .env.example .env
+cp .env.template .env
 ```
 
 ## Configuration
@@ -36,16 +39,30 @@ All settings are read from environment variables (or a `.env` file at the projec
 
 | Variable | Default | Description |
 |---|---|---|
-| `HOST` | `127.0.0.1` | Server bind address |
-| `PORT` | `8000` | Server port |
+| `TRANSPORT` | `http` | Transport mode: `http` or `stdio` |
+| `HOST` | `127.0.0.1` | Server bind address (HTTP mode only) |
+| `PORT` | `8000` | Server port (HTTP mode only) |
 | `EUVD_BASE_URL` | `https://euvdservices.enisa.europa.eu` | EUVD API base URL |
 | `EUVD_TIMEOUT` | `30` | HTTP request timeout (seconds) |
 | `EUVD_MAX_RETRIES` | `3` | Max retries on transient failures |
-| `CACHE_TTL` | `30` | TTL for cached list responses (minutes) |
+| `CACHE_TTL` | `30` | TTL for cached list responses (seconds) |
+| `CACHE_MAX_SIZE` | `128` | Maximum entries in the response cache |
 | `LOG_LEVEL` | `INFO` | Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
 | `USER_AGENT` | `euvd-mcp-tool` | User-Agent header sent to the EUVD API |
 
 ## Running
+
+### uvicorn (recommended)
+
+```bash
+uvicorn euvd_mcp.main:app --host 127.0.0.1 --port 8000
+```
+
+With live reload during development:
+
+```bash
+uvicorn euvd_mcp.main:app --host 127.0.0.1 --port 8000 --reload
+```
 
 ### Poetry
 
@@ -77,16 +94,22 @@ make compose-logs      # tail logs
 make compose-down      # stop
 ```
 
+### stdio (Claude Desktop / subprocess)
+
+```bash
+TRANSPORT=stdio poetry run python -m euvd_mcp.main
+```
+
+> **Note:** In stdio mode the `/health` and `/metrics` endpoints are not available. Logs go to stderr so they do not interfere with the MCP protocol on stdout.
+
 ## Integrating with LLM Clients
 
-### Claude Desktop
+### Claude Desktop — HTTP (server running separately)
 
 Add to your Claude Desktop configuration file:
 
 **macOS/Linux:** `~/Library/Application Support/Claude/claude_desktop_config.json`
 **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
-
-#### HTTP endpoint (server running separately)
 
 ```json
 {
@@ -98,7 +121,21 @@ Add to your Claude Desktop configuration file:
 }
 ```
 
-#### Docker
+### Claude Desktop — stdio (subprocess)
+
+```json
+{
+  "mcpServers": {
+    "euvd": {
+      "command": "poetry",
+      "args": ["run", "python", "-m", "euvd_mcp.main"],
+      "env": { "TRANSPORT": "stdio" }
+    }
+  }
+}
+```
+
+### Claude Desktop — Docker
 
 ```json
 {
@@ -133,22 +170,32 @@ Add to your Claude Desktop configuration file:
 | `get_vulnerability_by_id` | Fetch a single vulnerability by EUVD ID (e.g. `EUVD-2024-45012`) |
 | `get_advisory_by_id` | Fetch an advisory by its vendor-assigned ID |
 
+## Observability
+
+Two endpoints are available in HTTP mode:
+
+| Endpoint | Description |
+|---|---|
+| `GET /health` | Liveness probe — returns `{"status": "ok", "version": "...", "uptime_seconds": N}` |
+| `GET /metrics` | Request counts, per-tool latencies, cache hit/miss ratio, error breakdown |
+
 ## Project Structure
 
 ```
 euvdmcp/
 ├── euvd_mcp/
-│   ├── main.py                    # MCP server and tool definitions
+│   ├── main.py                    # MCP server, tool definitions, health/metrics routes
 │   ├── controllers/
-│   │   └── euvd_api.py            # Async API client with retry and cache
+│   │   └── euvd_api.py            # Async API client with retry and TTL cache
 │   ├── models/
 │   │   ├── input_models.py        # Pydantic input validation models
 │   │   └── vulnerability.py       # Response data models
 │   ├── utils/
 │   │   ├── settings.py            # Configuration (pydantic-settings)
-│   │   └── logging_config.py      # Structured logging setup
+│   │   ├── logging_config.py      # Structured logging setup
+│   │   └── metrics.py             # In-process metrics collector
 │   └── tests/                     # pytest test suite
-├── Dockerfile
+├── Dockerfile                     # Multi-stage build, non-root user, HEALTHCHECK
 ├── docker-compose.yml
 ├── Makefile
 └── pyproject.toml

@@ -395,6 +395,10 @@ async def get_advisory_by_id(advisory_id: str) -> dict[str, Any]:
     return advisory.model_dump(mode="json")
 
 
+# ASGI app for use with an external server (HTTP transport only):
+#   uvicorn euvd_mcp.main:app --host 0.0.0.0 --port 8000
+app = mcp.http_app()
+
 if __name__ == "__main__":
     if settings.transport == "stdio":
         logger.info(
@@ -402,4 +406,6 @@ if __name__ == "__main__":
         )
         mcp.run(transport="stdio")
     else:
-        mcp.run(transport="http", host=settings.host, port=settings.port)
+        import uvicorn
+
+        uvicorn.run(app, host=settings.host, port=settings.port)

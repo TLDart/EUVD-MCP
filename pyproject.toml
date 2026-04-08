@@ -11,6 +11,7 @@ fastmcp = "3.2.0"
 httpx = "^0.28.1"
 pydantic-settings = "2.13.1"
 cachetools = "^7.0"
+uvicorn = {extras = ["standard"], version = "0.44.0"}
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^9.0.2"
