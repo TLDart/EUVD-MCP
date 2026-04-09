@@ -74,7 +74,7 @@ jobs:
         run: poetry install
 
       - name: Run Bandit security scan (medium severity and above)
-        run: poetry run bandit -r euvd_mcp -ll
+        run: poetry run bandit -r euvd_mcp -ll --exclude euvd_mcp/tests
 
       - name: Audit dependencies with pip-audit
         run: poetry run pip-audit

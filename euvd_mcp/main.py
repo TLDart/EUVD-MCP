@@ -175,12 +175,12 @@ mcp = FastMCP(
 
 if settings.transport == "http":
     # Custom routes only make sense over HTTP — stdio has no HTTP server.
-    @mcp.custom_route("/", methods=["GET"])  # type: ignore[misc]
+    @mcp.custom_route("/", methods=["GET"])
     async def root_redirect(request: Request) -> RedirectResponse:
         """Redirect root to the MCP endpoint."""
         return RedirectResponse(url="/mcp")
 
-    @mcp.custom_route("/health", methods=["GET"])  # type: ignore[misc]
+    @mcp.custom_route("/health", methods=["GET"])
     async def health_check(request: Request) -> JSONResponse:
         """Liveness probe — returns 200 while the server is running."""
         return JSONResponse(
@@ -191,13 +191,13 @@ if settings.transport == "http":
             }
         )
 
-    @mcp.custom_route("/metrics", methods=["GET"])  # type: ignore[misc]
+    @mcp.custom_route("/metrics", methods=["GET"])
     async def metrics_endpoint(request: Request) -> JSONResponse:
         """Operational metrics: request counts, latencies, cache stats, error breakdown."""
         return JSONResponse(metrics.to_dict())
 
 
-@mcp.tool()  # type: ignore[misc]
+@mcp.tool()
 @_handle_tool_errors
 async def get_last_vulnerabilities() -> dict[str, Any]:
     """
@@ -219,7 +219,7 @@ async def get_last_vulnerabilities() -> dict[str, Any]:
     return response.model_dump(mode="json")
 
 
-@mcp.tool()  # type: ignore[misc]
+@mcp.tool()
 @_handle_tool_errors
 async def get_exploited_vulnerabilities() -> dict[str, Any]:
     """Return the 8 most recently recorded vulnerabilities actively exploited in the wild.
@@ -241,7 +241,7 @@ async def get_exploited_vulnerabilities() -> dict[str, Any]:
     return response.model_dump(mode="json")
 
 
-@mcp.tool()  # type: ignore[misc]
+@mcp.tool()
 @_handle_tool_errors
 async def get_critical_vulnerabilities() -> dict[str, Any]:
     """Return the 8 most recently published vulnerabilities with a critical CVSS score (9.0-10.0).
@@ -263,7 +263,7 @@ async def get_critical_vulnerabilities() -> dict[str, Any]:
     return response.model_dump(mode="json")
 
 
-@mcp.tool()  # type: ignore[misc]
+@mcp.tool()
 @_handle_tool_errors
 async def search_vulnerabilities(
     from_score: float | None = None,
@@ -347,7 +347,7 @@ async def search_vulnerabilities(
     return response.model_dump(mode="json")
 
 
-@mcp.tool()  # type: ignore[misc]
+@mcp.tool()
 @_handle_tool_errors
 async def get_vulnerability_by_id(enisa_id: str) -> dict[str, Any]:
     """
@@ -371,7 +371,7 @@ async def get_vulnerability_by_id(enisa_id: str) -> dict[str, Any]:
     return vulnerability.model_dump(mode="json")
 
 
-@mcp.tool()  # type: ignore[misc]
+@mcp.tool()
 @_handle_tool_errors
 async def get_advisory_by_id(advisory_id: str) -> dict[str, Any]:
     """
