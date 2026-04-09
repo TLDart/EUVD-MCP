@@ -1,39 +1,46 @@
-# Use an official Python runtime as a parent image
-FROM python:3.14-slim
+# ── Builder stage ────────────────────────────────────────────────────────────
+# Installs Poetry into a project-local venv, then discards the toolchain.
+FROM python:3.14-slim AS builder
 
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
-# Set the working directory in the container
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir poetry
 
-# Install Poetry
-RUN curl -sSL https://install.python-poetry.org | python3 -
-
-# Add Poetry to PATH
-ENV PATH="/root/.local/bin:$PATH"
-
-# Copy only requirements to cache them in docker layer
 COPY pyproject.toml poetry.lock ./
+RUN poetry config virtualenvs.in-project true \
+    && poetry install --no-interaction --no-ansi --only main --no-root
 
-# Install project dependencies
-RUN poetry config virtualenvs.create false \
-    && poetry install --no-interaction --no-ansi --no-root
+# ── Final stage ───────────────────────────────────────────────────────────────
+# Lean image: venv + application code only. No Poetry, no pip, no curl.
+FROM python:3.14-slim AS final
 
-# Copy the rest of the application code
-COPY . .
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/app/.venv/bin:$PATH"
 
-# Copy .env file for configuration if it exists
-COPY .env* ./
+WORKDIR /app
 
-# Expose the port
+# Copy the pre-built venv — no version-specific paths, no system Python pollution.
+COPY --from=builder /app/.venv /app/.venv
+
+# Copy only the application package.
+COPY euvd_mcp ./euvd_mcp
+
+# Non-root user — must run after COPY so chown covers all files.
+RUN groupadd --system app \
+    && useradd --system --gid app --no-create-home app \
+    && chown -R app:app /app
+
+USER app
+
 EXPOSE 8000
 
-# Run the application as a module
-CMD ["python", "-m", "euvd_mcp.main"]
+# Liveness probe — hits the /health endpoint (HTTP transport only).
+# If TRANSPORT=stdio is set, run the server as a local subprocess instead.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=8)" || exit 1
+
+CMD ["uvicorn", "euvd_mcp.main:app", "--host", "0.0.0.0", "--port", "8000"]

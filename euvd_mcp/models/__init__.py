@@ -1,7 +1,10 @@
-"""
-Pydantic models for EUVD API responses.
-"""
+"""Pydantic models for EUVD API responses and tool inputs."""
 
+from .input_models import (
+    GetAdvisoryByIdInput,
+    GetVulnerabilityByIdInput,
+    SearchVulnerabilitiesInput,
+)
 from .vulnerability import (
     Advisory,
     ExploitedVulnerabilities,
@@ -11,9 +14,14 @@ from .vulnerability import (
 )
 
 __all__ = [
+    # Response models
     "Vulnerability",
     "VulnerabilityListResponse",
     "ExploitedVulnerabilities",
     "SearchResponse",
     "Advisory",
+    # Input models
+    "SearchVulnerabilitiesInput",
+    "GetVulnerabilityByIdInput",
+    "GetAdvisoryByIdInput",
 ]

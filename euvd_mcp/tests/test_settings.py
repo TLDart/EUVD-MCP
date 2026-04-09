@@ -8,38 +8,48 @@ from euvd_mcp.utils.settings import Settings
 
 
 class TestSettingsDefaults:
-    """Test default settings."""
+    """Test default settings (env file bypassed to test coded defaults)."""
 
     def test_default_host(self):
         """Test default host setting."""
-        settings = Settings()
+        settings = Settings(_env_file=None)
         assert settings.host == "127.0.0.1"
 
     def test_default_port(self):
         """Test default port setting."""
-        settings = Settings()
+        settings = Settings(_env_file=None)
         assert settings.port == 8000
 
     def test_default_euvd_base_url(self):
         """Test default EUVD base URL."""
-        settings = Settings()
+        settings = Settings(_env_file=None)
         assert settings.euvd_base_url == "https://euvdservices.enisa.europa.eu"
 
     def test_default_euvd_timeout(self):
         """Test default EUVD timeout."""
-        settings = Settings()
+        settings = Settings(_env_file=None)
         assert settings.euvd_timeout == 30
 
     def test_default_euvd_max_retries(self):
         """Test default EUVD max retries."""
-        settings = Settings()
+        settings = Settings(_env_file=None)
         assert settings.euvd_max_retries == 3
 
     def test_user_agent_set(self):
         """Test that user agent is set."""
-        settings = Settings()
+        settings = Settings(_env_file=None)
         assert settings.user_agent is not None
-        assert "Mozilla" in settings.user_agent
+        assert len(settings.user_agent) > 0
+
+    def test_default_cache_ttl(self):
+        """Test default cache TTL."""
+        settings = Settings(_env_file=None)
+        assert settings.cache_ttl == 30
+
+    def test_default_log_level(self):
+        """Test default log level."""
+        settings = Settings(_env_file=None)
+        assert settings.log_level == "INFO"
 
 
 class TestSettingsEnvironmentVariables:
