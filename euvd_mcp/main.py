@@ -18,7 +18,7 @@ import httpx
 from fastmcp import FastMCP
 from pydantic import ValidationError
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, RedirectResponse
 
 from euvd_mcp.controllers.euvd_api import EUVDAPIManager
 from euvd_mcp.models import (
@@ -175,6 +175,11 @@ mcp = FastMCP(
 
 if settings.transport == "http":
     # Custom routes only make sense over HTTP — stdio has no HTTP server.
+    @mcp.custom_route("/", methods=["GET"])  # type: ignore[misc]
+    async def root_redirect(request: Request) -> RedirectResponse:
+        """Redirect root to the MCP endpoint."""
+        return RedirectResponse(url="/mcp")
+
     @mcp.custom_route("/health", methods=["GET"])  # type: ignore[misc]
     async def health_check(request: Request) -> JSONResponse:
         """Liveness probe — returns 200 while the server is running."""
