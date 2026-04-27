@@ -29,7 +29,7 @@ bandit = "1.9.4"
 safety = "3.7.0"
 pip-audit = "2.10.0"
 black = "26.3.1"
-pre-commit = "4.5.1"
+pre-commit = "4.6.0"
 pydocstyle = "6.3.0"
 
 [tool.flake8]
